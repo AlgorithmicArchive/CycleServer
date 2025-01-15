@@ -170,26 +170,38 @@ router.post("/add-multiple", authenticateToken, async (req, res) => {
   }
 
   try {
+    const results = []; // Store results of each cycle insertion
+
     for (const cycle of cycles) {
       const { startDay, startMonth, startYear } = cycle;
 
-      // Determine the previous month and year
-      let prevMonth = startMonth - 1;
-      let prevYear = startYear;
-
-      if (prevMonth === 0) {
-        prevMonth = 12; // December
-        prevYear -= 1; // Previous year
-      }
-
-      // Find the most recent record for the same user, previous month, and year
-      const previousRecord = await Cycle.findOne({
-        user_id, // Match user_id
-        endMonth: prevMonth,
-        endYear: prevYear,
+      // Initial check with startMonth
+      let previousRecord = await Cycle.findOne({
+        user_id,
+        endMonth: startMonth,
+        endYear: startYear,
       })
         .sort({ endDay: -1 }) // Sort by endDay in descending order to get the latest
         .exec();
+
+      // If no record found, check with startMonth - 1
+      if (!previousRecord) {
+        let prevMonth = startMonth - 1;
+        let prevYear = startYear;
+
+        if (prevMonth === 0) {
+          prevMonth = 12; // December
+          prevYear -= 1; // Previous year
+        }
+
+        previousRecord = await Cycle.findOne({
+          user_id,
+          endMonth: prevMonth,
+          endYear: prevYear,
+        })
+          .sort({ endDay: -1 })
+          .exec();
+      }
 
       if (previousRecord) {
         const prevEndDate = new Date(
@@ -208,15 +220,87 @@ router.post("/add-multiple", authenticateToken, async (req, res) => {
         cycle.afterDays = 0; // No previous record found, set afterDays to 0
       }
 
-      cycle.user_id = user_id; // Attach user_id to each cycle
+      cycle.user_id = user_id; // Attach user_id to the current cycle
+
+      // Save the cycle to the database
+      const savedCycle = await new Cycle(cycle).save();
+      results.push(savedCycle); // Add the saved cycle to the results array
     }
 
-    // Insert cycles into the collection
-    await Cycle.insertMany(cycles);
-
-    res.status(201).json({ message: "Cycles added successfully", cycles });
+    res
+      .status(201)
+      .json({ message: "Cycles added successfully", cycles: results });
   } catch (error) {
     console.error("Error adding cycles:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.get("/get-records", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId; // Retrieve the user ID from the token
+
+    // Validate the ObjectId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid user ID." });
+    }
+
+    // Extract filter criteria from query parameters
+    const { Day, Month, Year } = req.query;
+
+    // Build a dynamic filter object
+    const filter = { user_id: userId };
+
+    if (Day) {
+      filter.startDay = Number(Day); // Ensure the value is a number
+    }
+    if (Month) {
+      filter.startMonth = Number(Month); // Ensure the value is a number
+    }
+    if (Year) {
+      filter.startYear = Number(Year); // Ensure the value is a number
+    }
+
+    // Fetch records based on the filter and sort in ascending order
+    const records = await Cycle.find(filter).sort({
+      startYear: 1, // Ascending order
+      startMonth: 1, // Ascending order
+      startDay: 1, // Ascending order
+    });
+
+    // Check if any records exist
+    if (!records || records.length === 0) {
+      return res.status(404).json({
+        message: "No records found for this user with the given criteria.",
+      });
+    }
+
+    // Map month numbers to names
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    // Transform records to include month names
+    const transformedRecords = records.map((record) => ({
+      ...record._doc, // Spread the original record fields
+      startMonth: monthNames[record.startMonth - 1], // Convert month number to name
+      endMonth: monthNames[record.endMonth - 1],
+    }));
+
+    res.status(200).json(transformedRecords); // Return the transformed records
+  } catch (err) {
+    console.error("Error fetching records:", err);
     res.status(500).json({ error: "Server error" });
   }
 });

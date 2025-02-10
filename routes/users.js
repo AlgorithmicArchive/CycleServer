@@ -34,8 +34,8 @@ router.get("/latest-cycle", authenticateToken, async (req, res) => {
       const latestCycle = await Cycle.findOne({
         user_id: new mongoose.Types.ObjectId(id),
       })
-        .sort({ endYear: -1, endMonth: -1 }) // Sort by endYear first, then by endMonth
-        .select("-_id -user_id") // Exclude the _id field
+        .sort({ endYear: -1, endMonth: -1, endDay: -1 }) // Added endDay for accurate sorting
+        .select("-_id -user_id") // Exclude the _id and user_id fields
         .exec();
 
       if (!latestCycle) {
